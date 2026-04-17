@@ -318,11 +318,12 @@ stargazer(r1, r2, r3, r4, type = "text", style = "apsr",
           star.char = c("+", "*", "**", "***"))
 
 # -----------------------------------------------------------------------------
-# 7. MARGINAL EFFECTS PLOT (Figure 1)
+# 7. MARGINAL EFFECTS PLOT (Figure 1) — with 95% CIs
 # -----------------------------------------------------------------------------
 
 df_sub <- subset(df, year >= 1989 & e_v2x_polyarchy_5C >= 0.0 & idea_narrow == 1)
 coeffs <- m2$coefficients
+vcov_m2 <- vcovSCC(m2, type = "HC3")  # Driscoll-Kraay vcov for CIs
 
 median_controls <- c(
   median(df_sub$v2cacamps, na.rm = TRUE),
@@ -347,8 +348,15 @@ make_pred <- function(pubfin_range, embcap_val, label) {
                 matrix(median_controls, nrow = length(pubfin_range),
                        ncol = length(median_controls), byrow = TRUE),
                 pubfin_range * embcap_val)
-  data.frame(pubfin = pubfin_range, predicted = as.vector(xhyp %*% coeffs),
-             embcap_level = label)
+  pred <- as.vector(xhyp %*% coeffs)
+  se   <- sqrt(diag(xhyp %*% vcov_m2 %*% t(xhyp)))
+  data.frame(
+    pubfin       = pubfin_range,
+    predicted    = pred,
+    ci_lower     = pred - 1.96 * se,
+    ci_upper     = pred + 1.96 * se,
+    embcap_level = label
+  )
 }
 
 df_plot <- rbind(
@@ -363,19 +371,28 @@ df_plot$embcap_level <- factor(
 )
 
 ggplot(df_plot, aes(x = pubfin, y = predicted,
-                    color = embcap_level, linetype = embcap_level)) +
+                    color = embcap_level, fill = embcap_level,
+                    linetype = embcap_level)) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
+              alpha = 0.15, color = NA) +
   geom_line(size = 1.2) +
   geom_rug(data = df_sub, aes(x = v2elpubfin_l1), inherit.aes = FALSE,
            sides = "b", alpha = 0.3, length = unit(0.02, "npc")) +
   labs(
     x = "Public Funding (t-1)",
     y = "Predicted Political Corruption\n(Within-Country Deviations, Higher = More Corrupt)",
-    color = "EMB Capacity:", linetype = "EMB Capacity:"
+    color = "EMB Capacity:", fill = "EMB Capacity:",
+    linetype = "EMB Capacity:"
   ) +
   theme_minimal(base_size = 12) +
   theme(legend.position = "bottom", legend.text = element_text(size = 10),
         panel.grid.minor = element_blank()) +
   scale_color_manual(values = c(
+    "High (90th pct)"   = "#000000",
+    "Medium (50th pct)" = "#666666",
+    "Low (10th pct)"    = "#CCCCCC"
+  )) +
+  scale_fill_manual(values = c(
     "High (90th pct)"   = "#000000",
     "Medium (50th pct)" = "#666666",
     "Low (10th pct)"    = "#CCCCCC"
@@ -387,6 +404,57 @@ ggplot(df_plot, aes(x = pubfin, y = predicted,
   ))
 
 ggsave("figure1_marginal_effects.pdf", width = 7, height = 5)
+
+# -----------------------------------------------------------------------------
+# 7b. CONDITIONAL MARGINAL EFFECT PLOT (New Figure, e.g., Figure 1b)
+# -----------------------------------------------------------------------------
+# Plots the marginal effect of public funding (dy/dx) across the range of
+# EMB capacity, with 95% CIs, plus a rug/histogram of the EMB capacity
+# distribution. This makes clear that Model 1's significant main effect is an
+# average driven by the high-capacity tail; at low capacity the effect is null
+# or positive, while at high capacity it is strongly negative.
+
+b_pubfin   <- coeffs["v2elpubfin_l1"]
+b_interact <- coeffs["v2elpubfin_l1:v2elembcap_l1"]
+
+v_pubfin   <- vcov_m2["v2elpubfin_l1", "v2elpubfin_l1"]
+v_interact <- vcov_m2["v2elpubfin_l1:v2elembcap_l1",
+                      "v2elpubfin_l1:v2elembcap_l1"]
+c_pf_int   <- vcov_m2["v2elpubfin_l1",
+                      "v2elpubfin_l1:v2elembcap_l1"]
+
+embcap_min <- min(df_sub$v2elembcap_l1, na.rm = TRUE)
+embcap_max <- max(df_sub$v2elembcap_l1, na.rm = TRUE)
+embcap_seq <- seq(embcap_min, embcap_max, length.out = 200)
+
+me     <- b_pubfin + b_interact * embcap_seq
+var_me <- v_pubfin + embcap_seq^2 * v_interact + 2 * embcap_seq * c_pf_int
+se_me  <- sqrt(var_me)
+
+df_me <- data.frame(
+  embcap   = embcap_seq,
+  me       = me,
+  ci_lower = me - 1.96 * se_me,
+  ci_upper = me + 1.96 * se_me
+)
+
+df_rug <- data.frame(embcap = df_sub$v2elembcap_l1)
+df_rug <- df_rug[!is.na(df_rug$embcap), , drop = FALSE]
+
+ggplot(df_me, aes(x = embcap, y = me)) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_rug(data = df_rug, aes(x = embcap), inherit.aes = FALSE,
+           sides = "b", alpha = 0.3, length = unit(0.02, "npc")) +
+  labs(
+    x = "EMB Capacity (t-1)",
+    y = "Marginal Effect of Public Funding on Political Corruption"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave("figure1b_conditional_effect.pdf", width = 7, height = 5)
 
 # -----------------------------------------------------------------------------
 # 8. ROBUSTNESS: ALTERNATIVE LAG STRUCTURES (Table A1)
