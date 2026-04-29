@@ -85,7 +85,6 @@ section by section or in full.
 ## Author
 
 Halfdan Lynge
-Chief Advisor, Danish Agency for Digital Government (DIGST)  
 Visiting Senior Researcher, Wits School of Governance  
 Research Fellow, Tayarisha Centre for Digital Governance
 
